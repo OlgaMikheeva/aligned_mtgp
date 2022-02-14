@@ -82,6 +82,21 @@ class AlignedMTGP(MTGP):
 
         self._init_warps(warp_groups)
 
+    def _monotonicGP(self, x_min, x_max, kern, likelihood, num_ind_z, num_ind_t, train_ind_loc):
+        Z = np.linspace(x_min, x_max, num_ind_z)[:, None]
+        if self.time_in_ODE:
+            T = np.linspace(0., 1., num_ind_t)[:, None]
+            zz, tt = np.meshgrid(Z, T, indexing='ij')
+            ind_points = np.stack([np.reshape(zz, [-1]), np.reshape(tt, [-1])], axis=-1)
+        else:
+            ind_points = Z
+        monGP = PathwiseMonotonicSVGP(kernel=kern,
+                                      inducing_variable=ind_points,
+                                      likelihood=likelihood,
+                                      time_in_ODE=self.time_in_ODE)
+        set_trainable(monGP.inducing_variable, train_ind_loc)
+        return monGP
+
     def _init_warps(self, warp_groups, train_ind_loc=False, num_ind_z=10, num_ind_t=3):
         # Warps
         likelihood = likelihoods.Gaussian(variance=0.01)
@@ -89,20 +104,6 @@ class AlignedMTGP(MTGP):
 
         list_of_kernels = isinstance(self.warp_kernel, list)
 
-        def monotonicGP(x_min, x_max, kern):
-            Z = np.linspace(x_min, x_max, num_ind_z)[:, None]
-            if self.time_in_ODE:
-                T = np.linspace(0., 1., num_ind_t)[:, None]
-                zz, tt = np.meshgrid(Z, T, indexing='ij')
-                ind_points = np.stack([np.reshape(zz, [-1]), np.reshape(tt, [-1])], axis=-1)
-            else:
-                ind_points = Z
-            monGP = PathwiseMonotonicSVGP(kernel=kern,
-                                          inducing_variable=ind_points,
-                                          likelihood=likelihood,
-                                          time_in_ODE=self.time_in_ODE)
-            set_trainable(monGP.inducing_variable, train_ind_loc)
-            return monGP
         if warp_groups is None:
             self.G = []
             for i in range(self.num_seq):
@@ -110,7 +111,8 @@ class AlignedMTGP(MTGP):
                     kernel = self.warp_kernel[i]
                 else:
                     kernel = self.warp_kernel
-                self.G.append(monotonicGP(self.x_min[i, 0], self.x_max[i, 0], kernel))
+                self.G.append(self._monotonicGP(self.x_min[i, 0], self.x_max[i, 0], kernel, likelihood,
+                                                num_ind_z, num_ind_t, train_ind_loc))
 
         else:
             base_G = {}
@@ -121,7 +123,8 @@ class AlignedMTGP(MTGP):
                         kernel = self.warp_kernel[warp_groups[i]]
                     else:
                         kernel = self.warp_kernel
-                    base_G[warp_groups[i]] = monotonicGP(tf.reduce_min(self.x_min), tf.reduce_max(self.x_max), kernel)
+                    base_G[warp_groups[i]] = self._monotonicGP(tf.reduce_min(self.x_min), tf.reduce_max(self.x_max),
+                                                               kernel, likelihood, num_ind_z, num_ind_t, train_ind_loc)
                 self.G.append(base_G[warp_groups[i]])
 
     def get_G_mean(self, X: tf.RaggedTensor) -> tf.Tensor:
