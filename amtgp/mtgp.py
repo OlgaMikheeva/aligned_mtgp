@@ -7,7 +7,6 @@ from gpflow import set_trainable
 from gpflow.base import Parameter
 from gpflow.conditionals import conditional
 from gpflow.config import default_float
-from gpflow.kernels import Kernel
 from gpflow.mean_functions import Zero
 from gpflow.models.model import GPModel, MeanAndVariance, RegressionData
 from gpflow.models.training_mixins import InputData, InternalDataTrainingLossMixin
@@ -16,11 +15,7 @@ from gpflow import kullback_leiblers
 from gpflow.models.util import inducingpoint_wrapper
 import tensorflow_probability.python.distributions as tfd  # workaround for PyCharm bug
 
-from amtgp.monotonic_parameter import MonotonicParameter
-
-
-RaggedRegressionData = Tuple[tf.RaggedTensor, tf.RaggedTensor]
-MaybeRaggedRegressionData = Union[RaggedRegressionData, RegressionData]
+from .utils import MaybeRaggedRegressionData
 
 # types of input
 SAME_X = 'same values'

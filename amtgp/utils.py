@@ -1,5 +1,11 @@
+from typing import Tuple, Union
+
 import tensorflow as tf
 from gpflow.utilities.ops import pca_reduce
+from gpflow.models.model import RegressionData
+
+RaggedRegressionData = Tuple[tf.RaggedTensor, tf.RaggedTensor]
+MaybeRaggedRegressionData = Union[RaggedRegressionData, RegressionData]
 
 
 def maybe_ragged_pca(Y, latent_dim):

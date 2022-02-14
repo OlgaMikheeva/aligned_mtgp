@@ -1,21 +1,11 @@
-from typing import Tuple, Union
-
 import tensorflow as tf
 from gpflow import kernels
 from gpflow import set_trainable
 from gpflow.kernels import Kernel
-from gpflow.models.model import RegressionData
 
-from amtgp.monotonic_parameter import MonotonicParameter
-from amtgp.mtgp import MTGP
-
-RaggedRegressionData = Tuple[tf.RaggedTensor, tf.RaggedTensor]
-MaybeRaggedRegressionData = Union[RaggedRegressionData, RegressionData]
-
-# types of input
-SAME_X = 'same values'
-SAME_LENGTH_X = 'same length'
-RAGGED_X = 'ragged'
+from .mtgp import MTGP
+from .monotonic_parameter import MonotonicParameter
+from .utils import MaybeRaggedRegressionData
 
 
 class AlignedMTGPmap(MTGP):
@@ -33,7 +23,6 @@ class AlignedMTGPmap(MTGP):
         Z_data_mean: tf.Tensor,
         *,
         warp_prior_kernel: Kernel = None,
-        train_warps=True,
         mean_function=None,
         q_diag: bool = False,
         q_mu=None,
@@ -70,6 +59,7 @@ class AlignedMTGPmap(MTGP):
                          L=L)
 
         # warps
+        train_warps = True
         self.t_min = tf.reduce_min(self.X)
         self.t_max = tf.reduce_max(self.X)
 
