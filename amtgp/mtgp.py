@@ -1,4 +1,4 @@
-from typing import Tuple, Union
+from typing import Optional
 
 import numpy as np
 import tensorflow as tf
@@ -221,6 +221,15 @@ class MTGP(GPModel, InternalDataTrainingLossMixin):
     def get_G(self, X: tf.RaggedTensor) -> tf.Tensor:
         return tf.squeeze(X, axis=-1).flat_values
 
+    def get_G_ragged(self, X: tf.RaggedTensor) -> tf.RaggedTensor:
+        return X
+
+    def get_G_mean(self, X: tf.RaggedTensor) -> tf.RaggedTensor:
+        G = self.get_G_ragged(X)
+        if len(G.shape) > 2:
+            G = tf.squeeze(G, axis=-1)
+        return G
+
     @tf.function
     def get_aligned_data_sample(self):
         """
@@ -294,3 +303,50 @@ class MTGP(GPModel, InternalDataTrainingLossMixin):
             full_output_cov=full_output_cov,
         )
         return mu, var
+
+    def predict_f_samples_dep_seq(self,
+                                  Xnew: tf.RaggedTensor,
+                                  num_samples: Optional[int] = None,
+                                  full_cov: bool = True,
+                                  full_output_cov: bool = True,
+                                  **kwargs) -> tf.RaggedTensor:
+        """
+        This function returns samples for Xnew. Z are also sampled and added to the input.
+        If full_cov is True, samples are correlated across sequences.
+        :param Xnew:
+        :param num_samples:
+        :param full_cov:
+        :param full_output_cov:
+        :param kwargs:
+        :return:
+        """
+        assert full_cov and full_output_cov, NotImplementedError
+
+        GZ = self.get_aligned_input_sample(Xnew, L=num_samples)
+        samples = super().predict_f_samples(GZ, full_cov=full_cov, full_output_cov=full_output_cov, **kwargs)
+        return tf.RaggedTensor.from_row_lengths(tf.transpose(samples, [1, 0, 2]), Xnew.row_lengths())
+
+    @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, None], dtype=default_float())])
+    def _pred(self, x: tf.Tensor) -> tf.Tensor:
+        samples = super().predict_f_samples(tf.transpose(x, [1, 0, 2]))
+        return tf.transpose(samples, [1, 0, 2])
+
+    def predict_f_samples(self,
+                          Xnew: tf.RaggedTensor,
+                          num_samples: Optional[int] = None,
+                          full_cov: bool = True,
+                          full_output_cov: bool = True) -> tf.RaggedTensor:
+        """
+        This function returns samples for Xnew. Z are also sampled and added to the input.
+        If full_cov is True, samples are correlated within each sequence.
+        :param Xnew:
+        :param num_samples:
+        :param full_cov:
+        :param full_output_cov:
+        :return:
+        """
+        assert full_cov and full_output_cov, NotImplementedError
+        GZ = self.get_aligned_input_sample(Xnew, num_samples)
+        GZ = tf.transpose(GZ, [1, 0, 2])
+        GZ_ragged = tf.RaggedTensor.from_row_lengths(GZ, Xnew.row_lengths())
+        return tf.map_fn(self._pred, GZ_ragged)

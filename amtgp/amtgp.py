@@ -127,18 +127,6 @@ class AlignedMTGP(MTGP):
                                                                kernel, likelihood, num_ind_z, num_ind_t, train_ind_loc)
                 self.G.append(base_G[warp_groups[i]])
 
-    def get_G_mean(self, X: tf.RaggedTensor) -> tf.Tensor:
-        X_flat = X.flat_values
-        rs = X.row_splits
-        G_samples = []
-        # TODO: do map()
-        for i in range(self.num_seq):
-            G_samples.append(self.G[i].predict_f(X_flat[rs[i]:rs[i + 1]]))
-
-        G = tf.concat(G_samples, axis=0)
-        G = tf.RaggedTensor.from_row_lengths(G, X.row_lengths())
-        return G.flat_values
-
     @tf.function
     def _g_sample(self, g, x, num_samples: int = None) -> tf.Tensor:
         if num_samples is None:
@@ -173,6 +161,10 @@ class AlignedMTGP(MTGP):
         G_samples = tf.transpose(G_samples, [1, 0, 2])
         return tf.RaggedTensor.from_row_lengths(G_samples, X.row_lengths())
 
+    def get_G_mean(self, X: tf.RaggedTensor, num_samples: int = 100) -> tf.RaggedTensor:
+        G_samples = self.get_G_ragged(X, num_samples)
+        return tf.map_fn(lambda x: tf.reduce_mean(x, axis=1)[:, 0], G_samples)
+
     @tf.function
     def get_aligned_input_sample(self, X: tf.RaggedTensor, num_samples: int = None):
         """
@@ -202,22 +194,3 @@ class AlignedMTGP(MTGP):
         var_exp = self.likelihood.variational_expectations(f_mean, f_var, Y)
         scale = tf.cast(1.0, kl.dtype)
         return tf.reduce_mean(tf.reduce_sum(var_exp, axis=1)) * scale - kl - self.kl_z() - self.kl_g()
-
-    @tf.function(input_signature=[tf.TensorSpec(shape=[None, None, None], dtype=default_float())])
-    def _pred(self, x: tf.Tensor) -> tf.Tensor:
-        samples = super().predict_f_samples(tf.transpose(x, [1, 0, 2]))
-        return tf.transpose(samples, [1, 0, 2])
-
-    def predict_f_samples(self,
-                          Xnew: tf.RaggedTensor,
-                          num_samples: Optional[int] = None,
-                          full_cov: bool = True,
-                          full_output_cov: bool = True,
-                          **kwargs) -> tf.RaggedTensor:
-        assert full_cov and full_output_cov, NotImplementedError
-
-        GZ = self.get_aligned_input_sample(Xnew, num_samples)
-        GZ = tf.transpose(GZ, [1, 0, 2])
-        GZ_ragged = tf.RaggedTensor.from_row_lengths(GZ, Xnew.row_lengths())
-        samples = tf.map_fn(self._pred, GZ_ragged)
-        return samples

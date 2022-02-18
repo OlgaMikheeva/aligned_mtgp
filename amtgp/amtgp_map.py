@@ -90,11 +90,15 @@ class AlignedMTGPmap(MTGP):
 
     @tf.function
     def get_G(self, X: tf.RaggedTensor) -> tf.Tensor:
+        return self.get_G_ragged(X).flat_values
+
+    @tf.function
+    def get_G_ragged(self, X: tf.RaggedTensor) -> tf.RaggedTensor:
         X_norm = (X - self.t_min) / (self.t_max - self.t_min)
         X_norm_flat = X_norm.flat_values
         rs = X_norm.row_splits
-        Gs = [self.G[i].conditional_value(X_norm_flat[rs[i]:rs[i+1]]) for i in range(self.num_seq)]
+        Gs = [self.G[i].conditional_value(X_norm_flat[rs[i]:rs[i + 1]]) for i in range(self.num_seq)]
         G = tf.concat(Gs, axis=0)
         G = tf.RaggedTensor.from_row_lengths(G, X.row_lengths())
         G = G * (self.t_max - self.t_min) + self.t_min
-        return G.flat_values
+        return G
