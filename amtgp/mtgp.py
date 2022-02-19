@@ -345,8 +345,23 @@ class MTGP(GPModel, InternalDataTrainingLossMixin):
         :param full_output_cov:
         :return:
         """
-        assert full_cov and full_output_cov, NotImplementedError
+        # assert full_cov and full_output_cov, NotImplementedError
         GZ = self.get_aligned_input_sample(Xnew, num_samples)
         GZ = tf.transpose(GZ, [1, 0, 2])
         GZ_ragged = tf.RaggedTensor.from_row_lengths(GZ, Xnew.row_lengths())
         return tf.map_fn(self._pred, GZ_ragged)
+
+    def predict_log_exp_density(
+        self, data: MaybeRaggedRegressionData, num_samples=100, full_cov: bool = False, full_output_cov: bool = False
+    ) -> tf.Tensor:
+        """
+        Compute the log of expected density of the data at the new data points (Z and warps are sampled).
+        """
+        if full_cov or full_output_cov:
+            raise NotImplementedError
+
+        X, Y = data
+        f_samples = self.predict_f_samples(X, num_samples)
+        f_mean = tf.map_fn(lambda x: tf.reduce_mean(x, axis=1), f_samples)
+        f_var = tf.map_fn(lambda x: tf.math.reduce_variance(x, axis=1), f_samples)
+        return self.likelihood.predict_log_density(f_mean.flat_values, f_var.flat_values, Y.flat_values)
