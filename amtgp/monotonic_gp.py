@@ -26,15 +26,7 @@ class PathwiseMonotonicSVGP(PathwiseSVGP):
         self.t_end = t_end
         self.t_nsamples = t_nsamples
 
-    def predict_f(self, Xnew: InputData, full_cov=False, full_output_cov=False) -> MeanAndVariance:
-        if self.time_in_ODE:
-            T = np.linspace(self.t_begin, self.t_end, 10)[:, None]
-            xx, tt = np.meshgrid(Xnew, T, indexing='ij')
-            XTnew = tf.stack([tf.reshape(xx, [-1]), tf.reshape(tt, [-1])], axis=-1)
-            _, var = super().predict_f(XTnew, full_cov=full_cov, full_output_cov=full_output_cov)
-        else:
-            _, var = super().predict_f(Xnew, full_cov=full_cov, full_output_cov=full_output_cov)
-
+    def _mean_ode_fn(self):
         def ode_fn(t, x):
             if self.time_in_ODE:
                 t_ = tf.tile(tf.reshape(t, [1, 1]), [tf.shape(x)[0], 1])
@@ -44,16 +36,38 @@ class PathwiseMonotonicSVGP(PathwiseSVGP):
             m, _ = self.posterior(posteriors.PrecomputeCacheType.NOCACHE).fused_predict_f(
                 x_, full_cov=False, full_output_cov=False)
             return m
+        return ode_fn
 
+    def predict_f(self, Xnew: InputData, full_cov=False, full_output_cov=False) -> MeanAndVariance:
+        if self.time_in_ODE:
+            T = np.linspace(self.t_begin, self.t_end, 10)[:, None]
+            xx, tt = np.meshgrid(Xnew, T, indexing='ij')
+            XTnew = tf.stack([tf.reshape(xx, [-1]), tf.reshape(tt, [-1])], axis=-1)
+            _, var = super().predict_f(XTnew, full_cov=full_cov, full_output_cov=full_output_cov)
+        else:
+            _, var = super().predict_f(Xnew, full_cov=full_cov, full_output_cov=full_output_cov)
+
+        ode_fn = self._mean_ode_fn()
         ode_solver = EulerODE(ode_fn, self.t_end, self.t_nsamples)
         f, _ = ode_solver.forward(Xnew, save_intermediate=False)
         return f, var
+
+    def _sampling_ode_fn(self):
+        def ode_fn(t, x):
+            if self.time_in_ODE:
+                t_ = tf.tile(tf.reshape(t, [1, 1, 1]), [self.paths.sample_shape[0], tf.shape(x)[1], 1])
+                x_ = tf.concat([x, t_], axis=-1)
+            else:
+                x_ = x
+            return self.paths(x_, sample_axis=0)
+        return ode_fn
 
     def predict_f_samples(self,
                           Xnew: TensorLike,
                           num_samples: Optional[int] = None,
                           full_cov: bool = True,
                           full_output_cov: bool = True,
+                          save_intermediate=False,
                           **kwargs) -> tf.Tensor:
         assert full_cov and full_output_cov, NotImplementedError
         if self.paths is None:
@@ -64,16 +78,11 @@ class PathwiseMonotonicSVGP(PathwiseSVGP):
 
         X_tiled = tf.tile(tf.expand_dims(Xnew, axis=0), [self.paths.sample_shape[0], 1, 1])
 
-        def ode_fn(t, x):
-            if self.time_in_ODE:
-                t_ = tf.tile(tf.reshape(t, [1, 1, 1]), [self.paths.sample_shape[0], tf.shape(x)[1], 1])
-                x_ = tf.concat([x, t_], axis=-1)
-            else:
-                x_ = x
-            return self.paths(x_, sample_axis=0, **kwargs)
-
+        ode_fn = self._sampling_ode_fn()
         ode_solver = EulerODE(ode_fn, self.t_end, self.t_nsamples)
-        f, _ = ode_solver.forward(X_tiled, save_intermediate=False)
+        f, f_all = ode_solver.forward(X_tiled, save_intermediate=save_intermediate)
+        if save_intermediate:
+            return f_all
         return f
 
     def elbo(self, data: tuple, num_samples: int = 32, num_bases: int = 1024) -> tf.Tensor:
